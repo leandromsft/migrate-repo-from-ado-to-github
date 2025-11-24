@@ -1,0 +1,241 @@
+name: inventory-report
+
+on:
+  workflow_dispatch:
+    inputs:
+      ado_org_name:
+        description: 'Azure DevOps Organization Name'
+        required: true
+        default: 'my-ado-org'
+
+permissions:
+  contents: read
+  models: read
+
+jobs:
+  run-inventory-report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: "📦 Install gh-ado2gh extension"
+        run: |
+          gh extension install github/gh-ado2gh
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+      
+      - name: "🗂️ Generate inventory report"
+        run: |
+          gh ado2gh inventory-report --ado-org "${{ github.event.inputs.ado_org_name }}"
+        env:
+          ADO_PAT: ${{ secrets.ADO_PAT }}
+
+      - name: "👀 View report content"
+        run: ls -R
+      
+      - name: "📊 Prepare CSV data for AI analysis"
+        id: prepare_csv_data
+        run: |
+          echo "Preparando dados dos CSVs para análise AI..."
+          
+          # Criar variável de ambiente com os dados dos CSVs
+          echo "CSV_DATA_CONTENT<<EOF" >> $GITHUB_ENV
+          echo "## DADOS COMPLETOS DOS ARQUIVOS CSV PARA ANÁLISE:" >> $GITHUB_ENV
+          echo "" >> $GITHUB_ENV
+          
+          echo "### 📊 ORGS.CSV:" >> $GITHUB_ENV
+          if [ -f "orgs.csv" ]; then
+            cat orgs.csv >> $GITHUB_ENV
+          else
+            echo "❌ Arquivo orgs.csv não encontrado" >> $GITHUB_ENV
+          fi
+          echo "" >> $GITHUB_ENV
+          echo "---" >> $GITHUB_ENV
+          echo "" >> $GITHUB_ENV
+          
+          echo "### 👥 TEAM-PROJECTS.CSV:" >> $GITHUB_ENV
+          if [ -f "team-projects.csv" ]; then
+            cat team-projects.csv >> $GITHUB_ENV
+          else
+            echo "❌ Arquivo team-projects.csv não encontrado" >> $GITHUB_ENV
+          fi
+          echo "" >> $GITHUB_ENV
+          echo "---" >> $GITHUB_ENV
+          echo "" >> $GITHUB_ENV
+          
+          echo "### 📁 REPOS.CSV:" >> $GITHUB_ENV
+          if [ -f "repos.csv" ]; then
+            cat repos.csv >> $GITHUB_ENV
+          else
+            echo "❌ Arquivo repos.csv não encontrado" >> $GITHUB_ENV
+          fi
+          echo "" >> $GITHUB_ENV
+          echo "---" >> $GITHUB_ENV
+          echo "" >> $GITHUB_ENV
+          
+          echo "### 🔧 PIPELINES.CSV:" >> $GITHUB_ENV
+          if [ -f "pipelines.csv" ]; then
+            cat pipelines.csv >> $GITHUB_ENV
+          else
+            echo "❌ Arquivo pipelines.csv não encontrado" >> $GITHUB_ENV
+          fi
+          echo "EOF" >> $GITHUB_ENV
+          
+          echo "✅ Dados preparados com sucesso!"
+          echo "📁 Arquivos CSV encontrados:"
+          ls -la *.csv 2>/dev/null || echo "⚠️ Nenhum arquivo CSV encontrado"
+
+      - name: "📊 Analyze CSV files with AI"
+        id: csv_analysis
+        uses: actions/ai-inference@v1
+        with:
+          prompt: |
+            Analise os seguintes arquivos CSV gerados pelo inventário do Azure DevOps e forneça um resumo executivo detalhado:
+
+            ${{ env.CSV_DATA_CONTENT }}
+
+            ## Arquivos para Análise:
+
+            1. **orgs.csv** - Informações da organização Azure DevOps
+            2. **team-projects.csv** - Detalhes dos projetos de equipe
+            3. **repos.csv** - Inventário completo dos repositórios
+            4. **pipelines.csv** - Listagem de pipelines de CI/CD
+
+            ## Estrutura da Análise Solicitada:
+
+            ### 1. **Visão Geral da Organização**
+            - Nome da organização e proprietário
+            - Quantidade total de projetos de equipe
+            - Quantidade total de repositórios
+            - Quantidade total de pipelines
+            - Quantidade total de pull requests
+            - Status de permissões administrativas
+
+            ### 2. **Análise de Projetos de Equipe**
+            - Projetos mais ativos (por quantidade de repositórios e pipelines)
+            - Projetos com maior número de PRs
+            - Projetos inativos ou subutilizados
+            - Distribuição de recursos por projeto
+
+            ### 3. **Análise de Repositórios**
+            - Repositórios por tamanho (maiores repositórios)
+            - Repositórios por atividade recente (último push)
+            - Repositórios com mais pipelines associados
+            - Repositórios com mais PRs
+            - Repositórios inativos (sem commits no último ano)
+            - Contribuidores mais ativos
+
+            ### 4. **Análise de Pipelines**
+            - Distribuição de pipelines por projeto
+            - Projetos com maior automação (mais pipelines)
+            - Identificação de padrões de nomenclatura
+            - Pipelines órfãos ou não utilizados
+
+            ### 5. **Recomendações para Migração**
+            - Projetos prioritários para migração (baseado em atividade)
+            - Repositórios que podem ser arquivados
+            - Consolidação de projetos similares
+            - Estratégia de migração por fases
+            - Identificação de dependências entre repositórios
+
+            ### 6. **Métricas de Saúde do DevOps**
+            - Taxa de automação (pipelines vs repositórios)
+            - Engajamento da equipe (PRs e commits)
+            - Distribuição de tamanhos de repositório
+            - Frequência de atualizações
+
+            ### 7. **Pontos de Atenção**
+            - Repositórios muito grandes que podem ter problemas na migração
+            - Projetos sem atividade recente
+            - Falta de pipelines em repositórios ativos
+            - Problemas potenciais de permissão
+
+            ## Formato de Saída Esperado:
+
+            Forneça um relatório estruturado em markdown com:
+            - Resumo executivo (2-3 parágrafos)
+            - Dados estatísticos principais em tabelas
+            - Gráficos textuais quando aplicável
+            - Lista de recomendações priorizadas
+            - Cronograma sugerido para migração
+            - Checklist de validação pós-migração
+            - Estratégias de rollback se necessário
+
+            ## Instruções Adicionais:
+
+            - Use os dados exatos dos CSVs
+            - Calcule percentuais e médias quando relevante  
+            - Identifique outliers e padrões interessantes
+            - Priorize insights acionáveis
+            - Mantenha o foco na preparação para migração para GitHub
+
+            Analise especificamente estes dados e forneça insights práticos para a equipe responsável pela migração.
+
+          model: openai/gpt-4o
+          max-tokens: 8000
+
+      - name: "📝 Create analysis report"
+        run: |
+          echo "# Relatório de Análise do Inventário Azure DevOps" > analysis-report.md
+          echo "" >> analysis-report.md
+          echo "**Organização:** ${{ github.event.inputs.ado_org_name }}" >> analysis-report.md
+          echo "**Data da Análise:** $(date)" >> analysis-report.md
+          echo "" >> analysis-report.md
+          echo "${{ steps.csv_analysis.outputs.response }}" >> analysis-report.md
+
+      - name: "📦 Upload logs artifact"
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: report-logs
+          path: "*.log"
+
+      - name: "📦 Upload inventory reports"
+        uses: actions/upload-artifact@v4
+        with:
+          name: inventory-report
+          path: "*.csv"
+
+      - name: "📦 Upload analysis reports"
+        uses: actions/upload-artifact@v4
+        with:
+          name: analysis-reports
+          path: analysis-report.md
+
+      - name: "📋 Create job summary"
+        run: |
+          echo "## 🎯 Resumo da Execução - Inventário Azure DevOps" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📊 Informações Gerais" >> $GITHUB_STEP_SUMMARY
+          echo "- **Organização:** ${{ github.event.inputs.ado_org_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Data/Hora:** $(date)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Executor:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Run ID:** ${{ github.run_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### ✅ Status das Etapas" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Inventário gerado para organização: ${{ github.event.inputs.ado_org_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Análise AI dos dados concluída" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Plano de migração gerado" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Relatórios exportados como artefatos" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### 📁 Artefatos Disponíveis" >> $GITHUB_STEP_SUMMARY
+          echo "| Artefato | Descrição |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-----------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 📊 inventory-report | Arquivos CSV com dados do inventário |" >> $GITHUB_STEP_SUMMARY
+          echo "| 📝 analysis-reports | Relatórios de análise e plano de migração |" >> $GITHUB_STEP_SUMMARY
+          echo "| 📋 report-logs | Logs detalhados de execução |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### 📋 Próximos Passos" >> $GITHUB_STEP_SUMMARY
+          echo "1. **Baixar artefatos**: Acesse a aba 'Summary' desta execução para baixar os relatórios" >> $GITHUB_STEP_SUMMARY
+          echo "2. **Revisar análise**: Examine o arquivo \`analysis-report.md\` para insights detalhados" >> $GITHUB_STEP_SUMMARY
+          echo "3. **Validar plano**: Revise o arquivo \`migration-plan.md\` antes de executar a migração" >> $GITHUB_STEP_SUMMARY
+          echo "4. **Executar migração**: Use os comandos sugeridos no plano para iniciar a migração" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "*Relatório gerado automaticamente pelo workflow de inventário Azure DevOps*" >> $GITHUB_STEP_SUMMARY
+          
+          # Também mostra no console para debug
+          echo "📋 Job summary criado com sucesso!"
+          echo "🔗 Acesse a aba 'Summary' para visualizar o relatório completo."

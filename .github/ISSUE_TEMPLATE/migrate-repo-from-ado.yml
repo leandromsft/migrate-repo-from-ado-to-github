@@ -1,0 +1,31 @@
+name: Migrate Repos from ADO
+description: Start repository migration from Azure DevOps Repos
+title: "[ADO REPO MIGRATION]: "
+labels: ["repo"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This form initiates repository migration from Azure DevOps Repos.
+        For more information see the [Wiki Page](https://example.com)
+  - type: input
+    id: ado_org_name
+    attributes:
+      label: Azure DevOps Organization
+      description: What is the name of the Azure DevOps Organizarion?
+    validations:
+      required: true
+  - type: input
+    id: ado_tp_name
+    attributes:
+      label: Azure DevOps Team Project
+      description: What is the name of the Team Project?
+    validations:
+      required: true
+  - type: input
+    id: ado_repo_name
+    attributes:
+      label: Azure DevOps Repository Name
+      description: What is the name of the repository you want to migrate?
+    validations:
+      required: true

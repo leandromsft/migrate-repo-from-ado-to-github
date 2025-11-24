@@ -1,0 +1,207 @@
+name: migrate-repo
+
+on:
+  issue_comment:
+    types: [created, edited]
+
+jobs:
+  run-migrate-repo:
+    runs-on: ubuntu-latest
+    if: ${{ contains(github.event.issue.labels.*.name, 'repo') && contains(github.event.comment.body, 'approved') }}
+    steps:
+      - name: "🔎 Parse form fields"
+        id: parse
+        uses: zentered/issue-forms-body-parser@v2.2.0
+
+      - name: "📝 Show parsed data"
+        run: echo ${{ toJSON(steps.parse.outputs.data) }}
+
+      - name: "🧮 Create variables"
+        id: set-variables
+        uses: actions/github-script@v7
+        with:
+          script: |
+            function slugify(text)
+            {
+                  return text
+                  .toString()                // Cast to string (optional)
+                  .normalize('NFKD')         // The normalize() using NFKD method returns the Unicode Normalization Form of a given string.
+                  .toLowerCase()             // Convert the string to lowercase letters
+                  .trim()                    // Remove whitespace from both sides of a string (optional)
+                  .replace(/\s+/g, '')       // Replace spaces with empty string
+                  .replace(/[^\w\-]+/g, '')  // Remove all non-word chars
+                  .replace(/\-\-+/g, '-');   // Replace multiple - with single
+            }
+
+            var orgName = '${{ fromJSON(steps.parse.outputs.data).azure-dev-ops-organization.text }}';
+            core.setOutput('ADO_ORG_NAME', orgName);
+
+            var tpName = '${{ fromJSON(steps.parse.outputs.data).azure-dev-ops-team-project.text }}';
+            core.setOutput('ADO_TP_NAME', tpName);
+            
+            var adoRepoName = '${{ fromJSON(steps.parse.outputs.data).azure-dev-ops-repository-name.text }}';
+            core.setOutput('ADO_REPO_NAME', adoRepoName);
+
+            core.setOutput('GH_ORG_NAME', '${{ github.repository_owner }}');
+
+            var slugRepoName = slugify('${{ fromJSON(steps.parse.outputs.data).azure-dev-ops-repository-name.text }}');
+            core.setOutput('GH_REPO_NAME', slugRepoName);
+
+      - name: "📢 Show Variables"
+        run: |
+          echo "Azure DevOps Info"
+          echo "✅ ADO Org Name = ${{ steps.set-variables.outputs.ADO_ORG_NAME }}"
+          echo "✅ ADO Team Project Name = ${{ steps.set-variables.outputs.ADO_TP_NAME }}"
+          echo "✅ ADO Repo Name = ${{ steps.set-variables.outputs.ADO_REPO_NAME }}"
+          
+          echo "GitHub Info"
+          echo "✅ GH Org Name = ${{ steps.set-variables.outputs.GH_ORG_NAME }}"
+          echo "✅ GH Repo Name = ${{ steps.set-variables.outputs.GH_REPO_NAME }}"
+      
+      - name: "📦 Install gh-ado2gh extension"
+        run: |
+          gh extension install github/gh-ado2gh
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+      
+      - name: "🚚 Migrate repo"
+        id: migrate-repo
+        run: |
+          gh ado2gh migrate-repo \
+            --ado-org "${{ steps.set-variables.outputs.ADO_ORG_NAME }}" \
+            --ado-team-project "${{ steps.set-variables.outputs.ADO_TP_NAME }}" \
+            --ado-repo "${{ steps.set-variables.outputs.ADO_REPO_NAME }}" \
+            --github-org "${{ steps.set-variables.outputs.GH_ORG_NAME }}" \
+            --github-repo "${{ steps.set-variables.outputs.GH_REPO_NAME }}" 2>&1| tee "$GITHUB_WORKSPACE/migration_exec.log"
+          
+          echo "migration_exec_log_file=$GITHUB_WORKSPACE/migration_exec.log" >> $GITHUB_OUTPUT
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+          ADO_PAT: ${{ secrets.ADO_PAT }}
+      
+      - name: "📥 Download logs"
+        id: download-logs
+        run: |
+          migrationLog=$(gh ado2gh download-logs --github-org "${{ steps.set-variables.outputs.GH_ORG_NAME }}" --github-repo "${{ steps.set-variables.outputs.GH_REPO_NAME }}")
+          echo "$migrationLog"
+
+          filename=$(echo "$migrationLog" | grep -oP "\[INFO\] Downloaded (.+) log to (.+)\." | awk '{print $NF}' | sed 's/\.$//')
+          echo "Arquivo de log detectado: $filename"
+
+          if [ -z "$filename" ]; then
+            echo "[ERRO] Nenhum arquivo de log detectado. O output 'logfile' será vazio."
+          else 
+            echo "Log Content: $filename"
+            cat $filename
+          fi
+          
+          echo "logfile=$filename" >> $GITHUB_OUTPUT
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+          ADO_PAT: ${{ secrets.ADO_PAT }}
+      
+      - name: "📦 Upload logs artifact"
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: migration-logs
+          path: "*.log"
+
+      - name: "💬 Comment Issue"
+        uses: actions/github-script@v7
+        if: always()
+        with:
+          github-token: ${{ secrets.GH_PAT }}
+          script: |
+            const fs = require('fs');
+            const path = `${{ steps.migrate-repo.outputs.migration_exec_log_file }}`;
+            const ghRepoUrl = `https://github.com/${{ steps.set-variables.outputs.GH_ORG_NAME }}/${{ steps.set-variables.outputs.GH_REPO_NAME }}`;
+
+            core.info(`Lendo arquivo de log da migração em: ${path}`);
+            core.info(`URL do repositório GitHub: ${ghRepoUrl}`);
+
+            let migrationExecLog = '';
+            
+            try {
+              migrationExecLog = fs.readFileSync(path, 'utf8');
+              core.info(`Log carregado`);
+            } catch (e) {
+              core.error(`Erro ao ler o arquivo de log: ${path}`);
+            }
+
+            let statusMsg = '';
+            if (migrationExecLog.includes('[ERROR]')) {
+              statusMsg = `❌ Migration failed.\nFor more details, check the logs in the workflow execution (artifacts section).`;
+            } else if (migrationExecLog.includes('[WARNING]')) {
+              statusMsg = `⚠️ Review migration.\nFor more details, check the logs in the workflow execution (artifacts section).\n\n**New GitHub Repository:** ${ghRepoUrl}`;
+            } else {
+              statusMsg = `✅ Migration successful\n\n**New GitHub Repository:** ${ghRepoUrl}`;
+            }
+            
+            console.info(`Status da migração: ${statusMsg}`);
+            const body = `${statusMsg}\n\nLog de execução:\n\n${migrationExecLog}`;
+            
+            const issueNumber = context.issue.number;
+
+            if (issueNumber) {
+              core.info(`Creating issue comment: ${issueNumber}`);
+
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                body: String(body)
+              });
+            } else {
+              core.info('No associated issue to comment on.');
+            }
+      
+      - name: "🏷️ Add topic to migrated repo"
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GH_PAT }}
+          script: |
+            try {
+              core.info('Adding topic "migrate-from-ado" to the migrated repository');
+              
+              await github.rest.repos.replaceAllTopics({
+                owner: '${{ steps.set-variables.outputs.GH_ORG_NAME }}',
+                repo: '${{ steps.set-variables.outputs.GH_REPO_NAME }}',
+                names: ['migrate-from-ado']
+              });
+              
+              core.info('✅ Topic "migrate-from-ado" added successfully');
+            } catch (error) {
+              core.warning(`Failed to add topic: ${error.message}`);
+            }
+      
+      - name: "🔒 Disable ADO repo"
+        run: |
+          gh ado2gh disable-ado-repo --ado-org "${{ steps.set-variables.outputs.ADO_ORG_NAME }}" --ado-team-project "${{ steps.set-variables.outputs.ADO_TP_NAME }}" --ado-repo "${{ steps.set-variables.outputs.ADO_REPO_NAME }}"
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+          ADO_PAT: ${{ secrets.ADO_PAT }}
+
+      - name: "📊 Migration Summary"
+        if: always()
+        run: |
+          echo "## Migration Summary" >> $GITHUB_STEP_SUMMARY
+          if grep -q '\[ERROR\]' ${{ steps.migrate-repo.outputs.migration_exec_log_file }}; then
+            echo "❌ Migration failed.\nFor more details, check the logs in the workflow execution (artifacts section)." >> $GITHUB_STEP_SUMMARY
+          elif grep -q '\[WARNING\]' ${{ steps.migrate-repo.outputs.migration_exec_log_file }}; then
+            echo "⚠️ Review migration.\nFor more details, check the logs in the workflow execution (artifacts section)." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ Migration successful" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Só adiciona o link do repositório se não houver erro
+          if ! grep -q '\[ERROR\]' ${{ steps.migrate-repo.outputs.migration_exec_log_file }}; then
+            echo " " >> $GITHUB_STEP_SUMMARY
+            echo "New GitHub Repository" >> $GITHUB_STEP_SUMMARY
+            echo "[${{ steps.set-variables.outputs.GH_REPO_NAME }}](https://github.com/${{ steps.set-variables.outputs.GH_ORG_NAME }}/${{ steps.set-variables.outputs.GH_REPO_NAME }})" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo " " >> $GITHUB_STEP_SUMMARY
+          echo "Triggering Issue" >> $GITHUB_STEP_SUMMARY
+          echo "[Issue #${{ github.event.issue.number }}](https://github.com/${{ github.repository }}/issues/${{ github.event.issue.number }})" >> $GITHUB_STEP_SUMMARY
+          
