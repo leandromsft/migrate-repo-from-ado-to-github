@@ -8,6 +8,7 @@ This automation uses the official GitHub tool: [GitHub Enterprise Importer](http
 
 - [Azure DevOps with GitHub Repositories – Your path to Agentic AI](https://devblogs.microsoft.com/devops/azure-devops-with-github-repositories-your-path-to-agentic-ai/)
 - [Accelerate innovation by migrating your repositories from Azure DevOps to GitHub](https://resources.github.com/accelerate-innovation-azure-devops-migration/)
+- [Azure DevOps to GitHub migration Playbook: Unlocking Agentic DevOps](https://devblogs.microsoft.com/all-things-azure/azure-devops-to-github-migration-playbook-unlocking-agentic-devops/)
 
 ## 🛠️ Prerequisites
 
